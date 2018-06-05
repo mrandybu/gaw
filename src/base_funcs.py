@@ -9,9 +9,10 @@ except:
 
 
 class BaseFuncs(object):
-    def __init__(self, action, flags):
-        self.action = action
-        self.flags = flags
+    def __init__(self, args):
+        self.path = args['path']
+        self.action = args['action']
+        self.args = args['args']
 
     def set_args(self):
         allow_args = {
@@ -19,7 +20,7 @@ class BaseFuncs(object):
             'rebuild': self.rebuild
         }
         try:
-            return allow_args[self.action](self.flags)
+            return allow_args[self.action](self.path, self.args)
         except:
             return False
 
@@ -27,14 +28,12 @@ class BaseFuncs(object):
         return kwargs
 
     @staticmethod
-    def clone_repo(*args):
-        pac_list_file = args[0][0]
-        if not os.path.exists(pac_list_file):
+    def clone_repo(path, param):
+        if not os.path.exists(path):
             return 'Path to file not exist!'
         pac_list = []
-        clone_param = args[0][1]
         try:
-            with open(pac_list_file) as plf:
+            with open(path) as plf:
                 for pac_name in plf:
                     pac_list.append(
                         (pac_name.split('\n'))[0]
@@ -42,13 +41,14 @@ class BaseFuncs(object):
         except:
             return 'Open file error!'
         clone_command = [['git clone'.split()], ['ssh git.alt clone'.split()]]
-        if clone_param == '--local':
-            clone_command = clone_command[0]
-        elif clone_param == '--remote':
-            clone_command = clone_command[1]
-        elif clone_param == '--all':
-            clone_command = clone_command
-        else:
+        params = {
+            'local': clone_command[0],
+            'remote': clone_command[1],
+            'all': clone_command
+        }
+        try:
+            clone_command = params[param]
+        except:
             return False
         for pac_name in pac_list:
             pac_name_git = pac_name + '.git'
@@ -61,31 +61,46 @@ class BaseFuncs(object):
                 command.remove(full_repo_path)
                 clone_repo.stdout.read()
 
+    def _find_in_git_dir(self, dir_pac):
+        def read_spec(spec_file):
+            try:
+                spec_path = (spec_file.stdout.read().decode('utf-8').split('\n'))[0]
+                changelog = self.get_changelog(spec_path)
+                return changelog
+            except:
+                pass
+
+        gear_dir = os.path.join(dir_pac, '.gear')
+        if os.path.exists(gear_dir):
+            gear_spec = Popen(['find', gear_dir, '-name', '*.spec'], stdout=PIPE)
+            changelog_line = read_spec(gear_spec)
+            if changelog_line is not None:
+                return changelog_line
+        dir_spec = Popen(['find', dir_pac, '-name', '*.spec'], stdout=PIPE)
+        changelog_line = read_spec(dir_spec)
+        if changelog_line is not None:
+            return changelog_line
+
     def find_spec(self, dir_):
         dir_list = Popen(['ls', '-a', dir_], stdout=PIPE)
         grep_dir = Popen(['grep', '.git'], stdin=dir_list.stdout, stdout=PIPE)
         git = grep_dir.stdout.read().decode('utf-8')
         if len(git) != 0:
-            def read_spec(spec_file):
-                try:
-                    spec_path = (spec_file.stdout.read().decode('utf-8').split('\n'))[0]
-                    changelog = self.get_changelog(spec_path)
-                    return changelog
-                except:
-                    pass
+            get_spec = self._find_in_git_dir(dir_)
+            return get_spec
 
-            gear_dir = os.path.join(dir_, '.gear')
-            if os.path.exists(gear_dir):
-                gear_spec = Popen(['find', gear_dir, '-name', '*.spec'], stdout=PIPE)
-                changelog_line = read_spec(gear_spec)
-                if changelog_line is not None:
-                    return changelog_line
-            dir_spec = Popen(['find', dir_, '-name', '*.spec'], stdout=PIPE)
-            changelog_line = read_spec(dir_spec)
-            if changelog_line is not None:
-                return changelog_line
         dir_list = Popen(['ls', dir_], stdout=PIPE) \
             .stdout.read().decode('utf-8').split('\n')
+        spec_list = []
+        for _dir in dir_list:
+            if len(_dir) != 0:
+                get_spec = self._find_in_git_dir(
+                    os.path.join(dir_, _dir)
+                )
+                if (get_spec is not None) & (get_spec is not False):
+                    spec_list.append([_dir, get_spec])
+
+        return spec_list
 
     @staticmethod
     def get_changelog(spec):
@@ -104,10 +119,5 @@ class BaseFuncs(object):
                 delimiters.append(changelog_list.index(sym))
                 break
         if len(delimiters) != 2:
-            return 'Parse changelog error!'
+            return False
         return ' '.join(changelog_list[delimiters[0]:delimiters[1]])
-
-
-if __name__ == '__main__':
-    bs = BaseFuncs('qwe', 'asd')
-    print(bs.find_spec('/home/mrdrew/git_clone'))
